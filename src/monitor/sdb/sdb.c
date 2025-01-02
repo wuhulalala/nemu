@@ -17,10 +17,13 @@
 #include <cpu/cpu.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <stdio.h>
 #include "sdb.h"
 
 static int is_batch_mode = false;
 
+uint8_t* guest_to_host(paddr_t paddr);
+paddr_t host_to_guest(uint8_t *haddr);
 void init_regex();
 void init_wp_pool();
 
@@ -52,8 +55,14 @@ static int cmd_q(char *args) {
   return -1;
 }
 
+
 static int cmd_help(char *args);
 
+static int cmd_si(char *args);
+
+static int cmd_info(char *args);
+
+static int cmd_x(char *args);
 static struct {
   const char *name;
   const char *description;
@@ -62,12 +71,63 @@ static struct {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
-
+  {"si", "Let the program execute N instructions in a single step and then pause. When N is not given, the default is 1", cmd_si },
+  {"info", "info r: Print register status info w: Print monitoring point information", cmd_info},
+  {"x", "Find the value of the expression EXPR, use the result as the starting memory address, \
+  and output N consecutive 4-byte values ​​in hexadecimal format", cmd_x},
   /* TODO: Add more commands */
 
 };
 
+
 #define NR_CMD ARRLEN(cmd_table)
+
+
+static int cmd_x(char *args) {
+  char *arg = strtok(args, " ");
+  paddr_t addr;
+  if (arg == NULL) {
+    Log("expected: N > 0");
+    return 0;
+  }
+  int N = atoi(arg);
+  if (N <= 0) {
+    Log("expected: N > 0");
+    return 0;
+  }
+  arg = strtok(NULL, " ");
+  if (arg == NULL) {
+    Log("expected: x N addr");
+    return 0;
+  }
+  if (sscanf(arg,"%x", &addr) != 1) {
+    Log("invalid address format");
+    return 0;
+  }
+
+  if ((unsigned long)addr < CONFIG_MBASE) {
+    Log("The memory address cannot be accessed");
+    return 0;
+  }
+
+  uint8_t *host_addr = guest_to_host(addr);
+  if (host_addr == NULL) {
+      Log("Error: Failed to convert guest address to host address.");
+      return 0;
+  }
+  uint32_t *p = (uint32_t *)host_addr;
+  uint32_t *end = (uint32_t *)(host_addr + N * sizeof(uint32_t));
+  while (p < end) {
+    printf("0x%08lx: \t", (unsigned long)host_to_guest((uint8_t *)p));
+
+    for (int j = 0; j < 4 && p < end; j++, p++) {
+        printf("0x%08x\t", *p);
+    }
+
+    printf("\n");
+  }
+  return 0;
+}
 
 static int cmd_help(char *args) {
   /* extract the first argument */
@@ -91,6 +151,47 @@ static int cmd_help(char *args) {
   }
   return 0;
 }
+
+static int cmd_si(char *args) {
+  char *arg = strtok(args, " ");
+  if (arg == NULL) {
+    cpu_exec(1);
+  } else {
+    int n = atoi(arg);
+    cpu_exec(n);
+  }
+  return 0;
+}
+
+static int cmd_info(char *args) {
+  char *arg = strtok(args, " ");
+  if (arg == NULL) {
+    Log("Need more arguments. expected: info w / r");
+    return -1;
+  } else {
+    char c = arg[0];
+    switch(c) {
+      case 'r':
+        isa_reg_display();
+        break;
+      case 'w':
+        Log("todo");
+        break;
+      default:
+        Log("wrong argument");
+    }
+  }
+  return 0;  
+}
+
+
+
+
+
+
+
+
+
 
 void sdb_set_batch_mode() {
   is_batch_mode = true;
