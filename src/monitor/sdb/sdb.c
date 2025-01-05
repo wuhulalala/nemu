@@ -26,7 +26,7 @@ uint8_t* guest_to_host(paddr_t paddr);
 paddr_t host_to_guest(uint8_t *haddr);
 void init_regex();
 void init_wp_pool();
-
+word_t expr(char *e, bool *success);
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 static char* rl_gets() {
   static char *line_read = NULL;
@@ -63,6 +63,8 @@ static int cmd_si(char *args);
 static int cmd_info(char *args);
 
 static int cmd_x(char *args);
+
+static int cmd_p(char *args);
 static struct {
   const char *name;
   const char *description;
@@ -75,6 +77,7 @@ static struct {
   {"info", "info r: Print register status info w: Print monitoring point information", cmd_info},
   {"x", "Find the value of the expression EXPR, use the result as the starting memory address, \
   and output N consecutive 4-byte values ​​in hexadecimal format", cmd_x},
+  {"p", "Find the value of the expression EXPR", cmd_p},
   /* TODO: Add more commands */
 
 };
@@ -82,6 +85,19 @@ static struct {
 
 #define NR_CMD ARRLEN(cmd_table)
 
+static int cmd_p(char *args) {
+  char *arg = strtok(args, "\"");
+  bool success;
+  if (arg == NULL) {
+    Log("expected: p expr");
+    return 0;
+  } 
+
+  expr(arg, &success);
+
+  
+  return 0;
+}
 
 static int cmd_x(char *args) {
   char *arg = strtok(args, " ");

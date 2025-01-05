@@ -19,10 +19,12 @@
  * Type 'man regex' for more information about POSIX regex functions.
  */
 #include <regex.h>
+#include <sys/types.h>
 
 enum {
   TK_NOTYPE = 256, TK_EQ,
-
+  TK_LPAREN, TK_RPAREN,
+  TK_NUM, TK_ID,
   /* TODO: Add more token types */
 
 };
@@ -39,6 +41,12 @@ static struct rule {
   {" +", TK_NOTYPE},    // spaces
   {"\\+", '+'},         // plus
   {"==", TK_EQ},        // equal
+  {"\\*", '*'},        // mul
+  {"\\/", '/'},        // divide
+  {"-", '-'},        // minus
+  {"\\(", TK_LPAREN},        // left parenthesis
+  {"\\)", TK_RPAREN},        // right parenthesis
+  {"[+-]?[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?", TK_NUM},        // right parenthesis
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -67,7 +75,7 @@ typedef struct token {
   char str[32];
 } Token;
 
-static Token tokens[32] __attribute__((used)) = {};
+static Token tokens[65536] __attribute__((used)) = {};
 static int nr_token __attribute__((used))  = 0;
 
 static bool make_token(char *e) {
@@ -81,13 +89,12 @@ static bool make_token(char *e) {
     /* Try all rules one by one. */
     for (i = 0; i < NR_REGEX; i ++) {
       if (regexec(&re[i], e + position, 1, &pmatch, 0) == 0 && pmatch.rm_so == 0) {
-        char *substr_start = e + position;
+        char *substr_start __attribute__((unused)) = e + position;
         int substr_len = pmatch.rm_eo;
-
+#ifdef DEBUG
         Log("match rules[%d] = \"%s\" at position %d with len %d: %.*s",
             i, rules[i].regex, position, substr_len, substr_len, substr_start);
-
-        position += substr_len;
+#endif
 
         /* TODO: Now a new token is recognized with rules[i]. Add codes
          * to record the token in the array `tokens'. For certain types
@@ -95,8 +102,32 @@ static bool make_token(char *e) {
          */
 
         switch (rules[i].token_type) {
+          case '+':
+          case '-':
+          case '*':
+          case '/':
+          case TK_LPAREN:
+          case TK_RPAREN:
+          case TK_EQ:
+            tokens[nr_token].type = rules[i].token_type;
+            nr_token++;
+            break;
+          case TK_NUM:
+            tokens[nr_token].type = rules[i].token_type;
+            strncpy(tokens[nr_token].str, e + position, substr_len);
+            *(tokens[nr_token].str + substr_len) = 0;
+            if (strncmp(tokens[nr_token].str, e + position, substr_len) != 0) {
+              Log("fail to copy the string");
+              return false;
+            }
+            nr_token++;
+            break;
+          case TK_NOTYPE:
+            break;
           default: TODO();
         }
+
+        position += substr_len;
 
         break;
       }
@@ -111,6 +142,190 @@ static bool make_token(char *e) {
   return true;
 }
 
+bool check_parentheses(int p, int q) {
+  int stk = 0;
+  int init = p;
+  if (p > q) {
+#ifdef DEBUG
+    Log("p should less or equal to q");
+#endif
+    return false;
+  } 
+
+  if (p < 0 || q >= nr_token) {
+#ifdef DEBUG
+    Log("index out of bound");
+#endif
+    return false;
+  }
+
+  if (tokens[p].type != TK_LPAREN) {
+#ifdef DEBUG
+    Log("the first token is not (");
+#endif
+    return false;
+  }
+  while (p <= q) {
+    if (p > init && p < q && stk < 1) {
+#ifdef DEBUG
+      Log("false, the whole expression should be surrounded by a matched parentheses");
+#endif
+      return false;
+    }
+    if (tokens[p].type == TK_LPAREN) {
+      stk++;
+    } else if (tokens[p].type == TK_RPAREN) {
+      if (stk <= 0) {
+        Log("Bad expression, There is no matching left parenthesis");
+        return false;
+      }
+      stk--;
+    }
+    p++;
+  }
+
+  if (stk != 0) {
+    Log("Bad expression There is no matching right parenthesis");
+    return false;
+  }
+#ifdef DEBUG
+  Log("the subexpression from %d to %d is surrounded by a matched parentheses", init, q);
+#endif
+
+  return true;
+}
+
+
+
+int right_end(int p, int q) {
+  int stk = 1;
+  p++;
+  while (stk != 0) {
+    if (tokens[p].type == TK_RPAREN) {
+      stk--;
+    } else if (tokens[p].type == TK_LPAREN) {
+      stk++;
+    }
+    p++;
+  }
+  if (p > q + 1) {
+    panic("right end out of bound");
+  }
+  return p;
+}
+
+int check_priority(int a, int b) {
+  if (a == '+' || a == '-') {
+    if (b == '+' || b == '-') {
+      return 0;
+    } else return -1;
+  } else {
+    if (b == '+' || b == '-') {
+      return 1;
+    } else return 0;
+  }
+}
+
+uint64_t eval(int p, int q) {
+  if (p > q) {
+    /* Bad expression */
+    Log("Bad expression");
+    return 0;
+  }
+  else if (p == q) {
+    /* Single token.
+     * For now this token should be a number.
+     * Return the value of the number.
+     */
+    if (tokens[p].type == TK_NUM) {
+      uint32_t val;
+      sscanf(tokens[p].str, "%u", &val) ;
+      
+      return val;
+    }
+  }
+  else if (check_parentheses(p, q) == true) {
+    /* The expression is surrounded by a matched pair of parentheses.
+     * If that is the case, just throw away the parentheses.
+     */
+    return eval(p + 1, q - 1);
+  }
+  else {
+    /* We should do more things here. */
+    int i = p;
+    int type = 0;
+    int pos = -1;
+    while (i <= q) {
+      switch (tokens[i].type) {
+        case TK_NUM:
+          i++;
+          break;
+        case TK_LPAREN:
+          i = right_end(i, q);
+          break;
+        case '+':
+        case '-':
+          if (pos == -1) {
+            type = tokens[i].type;
+            pos = i;
+          } else {
+            int cmp = check_priority(tokens[i].type, type);
+            if (cmp == 0) {
+              type = tokens[i].type;
+              pos = i;
+            } else if (cmp == 1) {
+              panic("There is no operation with lower priority than addition and subtraction.");
+              return 0;
+            } else {
+              type = tokens[i].type;
+              pos = i;
+            }
+          }
+          i++;
+          break;
+        case '*':
+        case '/':
+          if (pos == -1) {
+            type = tokens[i].type;
+            pos = i;
+          } else {
+            int cmp = check_priority(tokens[i].type, type);
+            if (cmp == 0) {
+              type = tokens[i].type;
+              pos = i;
+            } 
+            if (cmp == -1) {
+              panic("There is no operation with higher priority than mul and div.");
+            }
+          }
+          i++;
+          break;
+      } 
+    }
+
+    if (pos < p || pos > q) {
+      panic("op should between p and q");
+    }
+    uint64_t left = eval(p, pos - 1);
+    uint64_t right = eval(pos + 1, q);
+
+    switch (type) {
+      case '+': return left + right;
+      case '-': return left - right;
+      case '*': return left * right;
+      case '/': 
+        if (right == 0) return 0;
+        return (uint64_t)((int)left / (int)right);
+      default: 
+        panic("unknown operation");
+    }
+
+  }
+  return 0;
+}
+
+
+
 
 word_t expr(char *e, bool *success) {
   if (!make_token(e)) {
@@ -118,8 +333,6 @@ word_t expr(char *e, bool *success) {
     return 0;
   }
 
-  /* TODO: Insert codes to evaluate the expression. */
-  TODO();
-
-  return 0;
+  uint32_t result __attribute__((unused)) = (uint64_t)eval(0, nr_token - 1);
+  return result;
 }
