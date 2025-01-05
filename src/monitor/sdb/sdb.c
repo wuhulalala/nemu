@@ -85,6 +85,7 @@ static struct {
 
 #define NR_CMD ARRLEN(cmd_table)
 
+uint32_t tr = 0;
 static int cmd_p(char *args) {
   char *arg = strtok(args, "\"");
   bool success;
@@ -94,7 +95,7 @@ static int cmd_p(char *args) {
   } 
 
   expr(arg, &success);
-
+  tr++;
   
   return 0;
 }

@@ -14,17 +14,23 @@
 ***************************************************************************************/
 
 #include <isa.h>
+#include <memory/host.h>
 
 /* We use the POSIX regex functions to process regular expressions.
  * Type 'man regex' for more information about POSIX regex functions.
  */
 #include <regex.h>
 #include <sys/types.h>
+#include <threads.h>
 
+extern uint32_t tr;
+uint8_t* guest_to_host(paddr_t paddr);
 enum {
   TK_NOTYPE = 256, TK_EQ,
   TK_LPAREN, TK_RPAREN,
-  TK_NUM, TK_ID,
+  TK_DEC, TK_REG,
+  TK_NEQ, TK_AND,
+  TK_DEREF, TK_HEX
   /* TODO: Add more token types */
 
 };
@@ -39,14 +45,19 @@ static struct rule {
    */
 
   {" +", TK_NOTYPE},    // spaces
+  {"\\$[a-zA-Z_][a-zA-Z0-9_]*", TK_REG},        // right parenthesis
+  {"0[xX][0-9a-fA-F]+", TK_HEX},        // right parenthesis
+  {"[+-]?[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?", TK_DEC},        // right parenthesis
   {"\\+", '+'},         // plus
-  {"==", TK_EQ},        // equal
   {"\\*", '*'},        // mul
   {"\\/", '/'},        // divide
   {"-", '-'},        // minus
   {"\\(", TK_LPAREN},        // left parenthesis
   {"\\)", TK_RPAREN},        // right parenthesis
-  {"[+-]?[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?", TK_NUM},        // right parenthesis
+  {"==", TK_EQ},        // equal
+  {"==", TK_NEQ},        // right parenthesis
+  {"!=", TK_NEQ},        // right parenthesis
+  {"&&", TK_AND},        // right parenthesis
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -109,10 +120,14 @@ static bool make_token(char *e) {
           case TK_LPAREN:
           case TK_RPAREN:
           case TK_EQ:
+          case TK_NEQ:
+          case TK_AND:
             tokens[nr_token].type = rules[i].token_type;
             nr_token++;
             break;
-          case TK_NUM:
+          case TK_DEC:
+          case TK_HEX:
+          case TK_REG:
             tokens[nr_token].type = rules[i].token_type;
             strncpy(tokens[nr_token].str, e + position, substr_len);
             *(tokens[nr_token].str + substr_len) = 0;
@@ -237,18 +252,41 @@ uint64_t eval(int p, int q) {
      * For now this token should be a number.
      * Return the value of the number.
      */
-    if (tokens[p].type == TK_NUM) {
-      uint32_t val;
-      sscanf(tokens[p].str, "%u", &val) ;
-      
-      return val;
+    
+    uint64_t val;
+
+    switch(tokens[p].type) {
+      case TK_DEC:
+        sscanf(tokens[p].str, "%lu", &val) ;
+        return val;
+      case TK_HEX:
+        sscanf(tokens[p].str, "%lx", &val) ;
+        return val;
+      case TK_REG:
+        bool success;
+        val = isa_reg_str2val(tokens[p].str, &success);
+        if (success) return val;
+        return 0;
+      default:
+        panic("unkown type");
+
+
     }
-  }
+  } 
   else if (check_parentheses(p, q) == true) {
     /* The expression is surrounded by a matched pair of parentheses.
      * If that is the case, just throw away the parentheses.
      */
     return eval(p + 1, q - 1);
+  }
+  else if (tokens[p].type == TK_DEREF) {
+    // wait to test
+    paddr_t g_addr = eval(p + 1, q);
+    Assert(g_addr >= CONFIG_MBASE && g_addr <= CONFIG_MBASE + CONFIG_MSIZE, "guest memory under Memory Base");
+    uint8_t *h_addr = guest_to_host(g_addr);
+    return host_read(h_addr, 8);
+    
+
   }
   else {
     /* We should do more things here. */
@@ -257,9 +295,12 @@ uint64_t eval(int p, int q) {
     int pos = -1;
     while (i <= q) {
       switch (tokens[i].type) {
-        case TK_NUM:
+        case TK_DEC:
+        case TK_HEX:
+        case TK_REG:
           i++;
           break;
+
         case TK_LPAREN:
           i = right_end(i, q);
           break;
@@ -300,6 +341,13 @@ uint64_t eval(int p, int q) {
           }
           i++;
           break;
+        case TK_EQ:
+        case TK_NEQ:
+        case TK_AND:
+          type = tokens[i].type;
+          pos = i;
+          i = q + 1;
+          break;
       } 
     }
 
@@ -316,6 +364,15 @@ uint64_t eval(int p, int q) {
       case '/': 
         if (right == 0) return 0;
         return (uint64_t)((int)left / (int)right);
+      case TK_EQ:
+        if (left == right) return 1;
+        return 0;
+      case TK_NEQ:
+        if (left != right) return 1;
+        return 0;
+      case TK_AND:
+        if (left == 0) return 0;
+        return right != 0 ? 1 : 0;
       default: 
         panic("unknown operation");
     }
@@ -333,6 +390,13 @@ word_t expr(char *e, bool *success) {
     return 0;
   }
 
-  uint32_t result __attribute__((unused)) = (uint64_t)eval(0, nr_token - 1);
-  return result;
+  for (int i = 0; i < nr_token; i ++) {
+    if (tokens[i].type == '*' && (i == 0 || (tokens[i - 1].type != TK_DEC && tokens[i - 1].type != TK_HEX && tokens[i - 1].type != TK_REG) ) ) {
+      tokens[i].type = TK_DEREF;
+    }
+  }
+
+  uint64_t result __attribute__((unused)) = (uint64_t)eval(0, nr_token - 1);
+  printf("$%d = %lu\n", tr, result);
+  return 0;
 }
