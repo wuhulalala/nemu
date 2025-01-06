@@ -26,6 +26,10 @@ uint8_t* guest_to_host(paddr_t paddr);
 paddr_t host_to_guest(uint8_t *haddr);
 void init_regex();
 void init_wp_pool();
+WP* new_wp(char *str);
+void free_wp(WP *wp);
+WP* number2addr(int n);
+void watchpoint_display();
 word_t expr(char *e, bool *success);
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 static char* rl_gets() {
@@ -65,6 +69,10 @@ static int cmd_info(char *args);
 static int cmd_x(char *args);
 
 static int cmd_p(char *args);
+
+static int cmd_w(char *args);
+
+static int cmd_d(char *args);
 static struct {
   const char *name;
   const char *description;
@@ -78,14 +86,52 @@ static struct {
   {"x", "Find the value of the expression EXPR, use the result as the starting memory address, \
   and output N consecutive 4-byte values ​​in hexadecimal format", cmd_x},
   {"p", "Find the value of the expression EXPR", cmd_p},
+  {"w", "Set up monitoring points", cmd_w},
+  {"d", "Deleting a Watchpoint", cmd_d},
   /* TODO: Add more commands */
 
 };
-
+WP* new_wp(char *str);
 
 #define NR_CMD ARRLEN(cmd_table)
 
 uint32_t tr = 0;
+
+static int cmd_w(char *args) {
+  char *arg = strtok(args, "\"");
+  if (arg == NULL) {
+    Log("expected: p expr");
+    return 0;
+  } 
+
+  WP* wp = new_wp(arg);
+  Assert(wp, "There is no empty watchpoint");
+
+
+  return 0;
+
+}
+
+static int cmd_d(char *args) {
+  char *arg = strtok(args, " ");
+  if (arg == NULL) {
+    printf("expect: d N\n");
+    return 0;
+  }
+  int n = atoi(arg);
+  if (n < 0 || n >= NR_WP) {
+    printf("wrong watchpoint number\n");
+    return 0;
+  }
+
+  free_wp(number2addr(n));
+  printf("delete watchpoint %d\n", n);
+
+
+  
+  return 0;
+}
+
 static int cmd_p(char *args) {
   char *arg = strtok(args, "\"");
   bool success;
@@ -94,7 +140,11 @@ static int cmd_p(char *args) {
     return 0;
   } 
 
-  expr(arg, &success);
+  uint64_t result = expr(arg, &success);
+  if (!success) {
+    printf("something wrong in make_token\n");
+  }
+  printf("$%d = %lu\n", tr, result);
   tr++;
   
   return 0;
@@ -192,7 +242,7 @@ static int cmd_info(char *args) {
         isa_reg_display();
         break;
       case 'w':
-        Log("todo");
+        watchpoint_display();
         break;
       default:
         Log("wrong argument");

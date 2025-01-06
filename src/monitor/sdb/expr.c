@@ -397,6 +397,7 @@ word_t expr(char *e, bool *success) {
   }
 
   uint64_t result __attribute__((unused)) = (uint64_t)eval(0, nr_token - 1);
-  printf("$%d = %lu\n", tr, result);
-  return 0;
+  *success = true;
+  // printf("$%d = %lu\n", tr, result);
+  return result;
 }
