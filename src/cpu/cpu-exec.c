@@ -29,6 +29,8 @@ CPU_state cpu = {};
 uint64_t g_nr_guest_inst = 0;
 static uint64_t g_timer = 0; // unit: us
 static bool g_print_step = false;
+static bool g_print_ring = false;
+Decode s;
 
 bool watchpoint_diff();
 void device_update();
@@ -39,12 +41,28 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
 #endif
   IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
 #ifdef CONFIG_WATCHPOINT
-#endif
   if (watchpoint_diff()) {
     nemu_state.state = NEMU_STOP;
-    g_print_step = true;
   }
+#endif
   if (g_print_step) { IFDEF(CONFIG_ITRACE, puts(_this->logbuf)); }
+
+  if (g_print_ring && nemu_state.state != NEMU_RUNNING) {
+#ifdef CONFIG_RTRACE
+  int round = (_this->count < 20) ? _this->count : 20;
+  for (int i = 0; i < round; i++) {
+    vaddr_t cur_pc;
+    sscanf(_this->ringbuf[i], FMT_WORD "x", &cur_pc);
+    if (cur_pc == _this->pc) {
+      printf("-----> %s\n", _this->ringbuf[i]);
+    } else {
+      printf("       %s\n", _this->ringbuf[i]);
+    }
+
+  }
+
+#endif
+  }
 }
 
 static void exec_once(Decode *s, vaddr_t pc) {
@@ -52,7 +70,39 @@ static void exec_once(Decode *s, vaddr_t pc) {
   s->snpc = pc;
   isa_exec_once(s);
   cpu.pc = s->dnpc;
+
+#ifdef CONFIG_RTRACE
+{
+  int in = s->index % 20;
+  char* pr = s->ringbuf[in];
+  pr += snprintf(pr, sizeof(s->ringbuf[in]), FMT_WORD ":", s->pc);
+  int ilen = s->snpc - s->pc;
+  int i;
+  uint8_t *inst = (uint8_t *)&s->isa.inst;
+#ifdef CONFIG_ISA_x86
+  for (i = 0; i < ilen; i ++) {
+#else
+  for (i = ilen - 1; i >= 0; i --) {
+#endif
+    pr += snprintf(pr, 4, " %02x", inst[i]);
+  }
+  int ilen_max = MUXDEF(CONFIG_ISA_x86, 8, 4);
+  int space_len = ilen_max - ilen;
+  if (space_len < 0) space_len = 0;
+  space_len = space_len * 3 + 1;
+  memset(pr, ' ', space_len);
+  pr += space_len;
+
+  void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
+  disassemble(pr, s->ringbuf[in] + sizeof(s->ringbuf[in]) - pr,
+      MUXDEF(CONFIG_ISA_x86, s->snpc, s->pc), (uint8_t *)&s->isa.inst, ilen);
+  in++;
+  s->index = in;
+  s->count++;
+}
+#endif
 #ifdef CONFIG_ITRACE
+{
   char *p = s->logbuf;
   p += snprintf(p, sizeof(s->logbuf), FMT_WORD ":", s->pc);
   int ilen = s->snpc - s->pc;
@@ -75,11 +125,11 @@ static void exec_once(Decode *s, vaddr_t pc) {
   void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
   disassemble(p, s->logbuf + sizeof(s->logbuf) - p,
       MUXDEF(CONFIG_ISA_x86, s->snpc, s->pc), (uint8_t *)&s->isa.inst, ilen);
+}
 #endif
 }
 
 static void execute(uint64_t n) {
-  Decode s;
   for (;n > 0; n --) {
     exec_once(&s, cpu.pc);
     g_nr_guest_inst ++;
@@ -106,6 +156,7 @@ void assert_fail_msg() {
 /* Simulate how the CPU works. */
 void cpu_exec(uint64_t n) {
   g_print_step = (n < MAX_INST_TO_PRINT);
+  g_print_ring = (n < MAX_INST_TO_PRINT);
   switch (nemu_state.state) {
     case NEMU_END: case NEMU_ABORT: case NEMU_QUIT:
       printf("Program execution has ended. To restart the program, exit NEMU and run again.\n");
@@ -132,4 +183,9 @@ void cpu_exec(uint64_t n) {
       // fall through
     case NEMU_QUIT: statistic();
   }
+}
+
+void init_decode() {
+  s.index = 0;
+  s.count = 0;
 }

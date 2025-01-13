@@ -21,6 +21,19 @@
 #if   defined(CONFIG_PMEM_MALLOC)
 static uint8_t *pmem = NULL;
 #else // CONFIG_PMEM_GARRAY
+
+typedef struct Decode {
+  vaddr_t pc;
+  vaddr_t snpc; // static next pc
+  vaddr_t dnpc; // dynamic next pc
+  ISADecodeInfo isa;
+  IFDEF(CONFIG_ITRACE, char logbuf[128]);
+  IFDEF(CONFIG_RTRACE, char ringbuf[20][128]);
+  IFDEF(CONFIG_RTRACE, size_t index);
+  IFDEF(CONFIG_RTRACE, size_t count);
+} Decode;
+
+extern Decode s;
 static uint8_t pmem[CONFIG_MSIZE] PG_ALIGN = {};
 #endif
 
@@ -37,6 +50,22 @@ static void pmem_write(paddr_t addr, int len, word_t data) {
 }
 
 static void out_of_bound(paddr_t addr) {
+#ifdef CONFIG_RTRACE
+  int in = (s.index + 19) % 20;
+  vaddr_t trap_addr;
+  sscanf(s.ringbuf[in], FMT_WORD "x", &trap_addr);
+  int round = (s.count < 20) ? s.count : 20;
+  for (int i = 0; i < round; i++) {
+    vaddr_t cur_pc;
+    sscanf(s.ringbuf[i], FMT_WORD "x", &cur_pc);
+    if (cur_pc == trap_addr) {
+      printf("-----> %s\n", s.ringbuf[i]);
+    } else {
+      printf("       %s\n", s.ringbuf[i]);
+    }
+
+  }
+#endif 
   panic("address = " FMT_PADDR " is out of bound of pmem [" FMT_PADDR ", " FMT_PADDR "] at pc = " FMT_WORD,
       addr, PMEM_LEFT, PMEM_RIGHT, cpu.pc);
 }
@@ -51,6 +80,9 @@ void init_mem() {
 }
 
 word_t paddr_read(paddr_t addr, int len) {
+#ifdef CONFIG_MTRACE
+  printf("READ    " FMT_WORD "   %d\n", addr, len);
+#endif
   if (likely(in_pmem(addr))) return pmem_read(addr, len);
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
   out_of_bound(addr);
@@ -58,6 +90,9 @@ word_t paddr_read(paddr_t addr, int len) {
 }
 
 void paddr_write(paddr_t addr, int len, word_t data) {
+#ifdef CONFIG_MTRACE
+  printf("WRITE   " FMT_WORD "   %d   " FMT_WORD "\n", addr, len, data);
+#endif
   if (likely(in_pmem(addr))) { pmem_write(addr, len, data); return; }
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);

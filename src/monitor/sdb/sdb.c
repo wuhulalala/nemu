@@ -26,6 +26,7 @@ uint8_t* guest_to_host(paddr_t paddr);
 paddr_t host_to_guest(uint8_t *haddr);
 void init_regex();
 void init_wp_pool();
+void init_decode();
 WP* new_wp(char *str);
 void free_wp(WP *wp);
 WP* number2addr(int n);
@@ -308,4 +309,8 @@ void init_sdb() {
 
   /* Initialize the watchpoint pool. */
   init_wp_pool();
+
+
+  /* Initialize the Decode*/
+  init_decode();
 }
