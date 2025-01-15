@@ -15,6 +15,8 @@
 
 #include <isa.h>
 #include <memory/paddr.h>
+#include <stdio.h>
+#include <elf.h>
 
 void init_rand();
 void init_log(const char *log_file);
@@ -43,8 +45,15 @@ void sdb_set_batch_mode();
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
+static char *elf_file = NULL;
 static int difftest_port = 1234;
-
+#ifdef CONFIG_FTRACE
+Elf32_Ehdr elf_header;
+Elf32_Shdr symtab;
+Elf32_Shdr strtab;
+Elf32_Sym sym_table[256];
+char str_table[32768];
+#endif
 static long load_img() {
   if (img_file == NULL) {
     Log("No image is given. Use the default build-in image.");
@@ -66,28 +75,118 @@ static long load_img() {
   fclose(fp);
   return size;
 }
+#ifdef CONFIG_FTRACE
+static void init_elf() {
+  if (elf_file == NULL)   {
+    Log("No elf file is given.");
+    return;
+  }
 
+  FILE* fp = fopen(elf_file, "rb");
+  Assert(fp, "Can not open '%s", elf_file);
+
+  fseek(fp, 0, SEEK_END);
+  long size = ftell(fp);
+
+  Log("The elf is %s, size = %ld", img_file, size);
+
+  fseek(fp, 0, SEEK_SET);
+
+  {
+    int ret = fread(&elf_header, sizeof(Elf32_Ehdr), 1, fp);
+    assert(ret == 1);
+  }
+
+  if (elf_header.e_ident[0] != 0x7f || elf_header.e_ident[1] != 'E' || elf_header.e_ident[2] != 'L' || elf_header.e_ident[3] != 'F') {
+    Assert(0, "%s is not a elf file", elf_file);
+    fclose(fp);
+    return;
+  }
+  fseek(fp, elf_header.e_shoff, SEEK_SET);
+
+  Elf32_Shdr *shdr_table = malloc(sizeof(Elf32_Shdr) * elf_header.e_shnum);
+  
+  {
+    int ret = fread(shdr_table, sizeof(Elf32_Shdr), elf_header.e_shnum, fp);
+    assert(ret == elf_header.e_shnum);
+  }
+
+  for (int i = 0; i < elf_header.e_shnum; i++) {
+    Elf32_Shdr *shdr = &shdr_table[i];
+    if (shdr->sh_type == SHT_SYMTAB) {
+      memcpy(&symtab, shdr, sizeof(Elf32_Shdr));
+    }
+    if (shdr->sh_type == SHT_STRTAB) {
+      memcpy(&strtab, shdr, sizeof(Elf32_Shdr));
+      break;
+    }
+  }
+
+  free(shdr_table);
+
+  size_t entnum = symtab.sh_size / symtab.sh_entsize;
+
+  fseek(fp, symtab.sh_offset, SEEK_SET);
+  {
+    int ret = fread(sym_table, sizeof(Elf32_Sym), entnum, fp);
+    assert(ret == entnum);
+  }
+
+
+
+
+
+
+
+  fseek(fp, strtab.sh_offset, SEEK_SET);
+  {
+    int ret = fread(str_table, strtab.sh_size, 1, fp);
+    assert(ret == 1);
+  }
+
+
+  for (int i = 0; i < entnum; i++) {
+    Elf32_Sym *sym = &sym_table[i];
+    if (ELF32_ST_TYPE(sym->st_info) == STT_FUNC) {
+      printf("%s\n", &str_table[sym->st_name]);
+    }
+  }
+
+
+
+
+
+  fclose(fp);
+
+
+
+
+}
+#endif
 static int parse_args(int argc, char *argv[]) {
   const struct option table[] = {
     {"batch"    , no_argument      , NULL, 'b'},
     {"log"      , required_argument, NULL, 'l'},
     {"diff"     , required_argument, NULL, 'd'},
     {"port"     , required_argument, NULL, 'p'},
+    {"elf"     , required_argument, NULL, 'e'},
     {"help"     , no_argument      , NULL, 'h'},
     {0          , 0                , NULL,  0 },
   };
   int o;
-  while ( (o = getopt_long(argc, argv, "-bhl:d:p:", table, NULL)) != -1) {
+  while ( (o = getopt_long(argc, argv, "-bhl:d:p:e:", table, NULL)) != -1) {
     switch (o) {
       case 'b': sdb_set_batch_mode(); break;
       case 'p': sscanf(optarg, "%d", &difftest_port); break;
       case 'l': log_file = optarg; break;
+      case 'e': elf_file = optarg; break;
       case 'd': diff_so_file = optarg; break;
       case 1: img_file = optarg; return 0;
       default:
         printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
         printf("\t-b,--batch              run with batch mode\n");
         printf("\t-l,--log=FILE           output log to FILE\n");
+        printf("\t-e,--elf=FILE           resolve elf file\n");
         printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
         printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
         printf("\n");
@@ -121,6 +220,10 @@ void init_monitor(int argc, char *argv[]) {
   /* Load the image to memory. This will overwrite the built-in image. */
   long img_size = load_img();
 
+#ifdef CONFIG_FTRACE
+  /* Initialize ftrace. */
+  init_elf();
+#endif 
   /* Initialize differential testing. */
   init_difftest(diff_so_file, img_size, difftest_port);
 

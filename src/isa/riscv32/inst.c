@@ -18,6 +18,24 @@
 #include <cpu/ifetch.h>
 #include <cpu/decode.h>
 #include <stdint.h>
+#include <elf.h>
+
+#ifdef CONFIG_FTRACE
+extern Elf32_Ehdr elf_header;
+extern Elf32_Shdr symtab;
+extern Elf32_Shdr strtab;
+extern Elf32_Sym sym_table[256];
+extern char str_table[10000];
+size_t indent = 0;
+static char *p = NULL;
+char *init = NULL;
+uint64_t nc = 0;
+static uint64_t max = 0;
+#define THRESHOLD 100
+#endif
+#ifdef CONFIG_DIFFTEST
+void difftest_skip_ref();
+#endif
 
 #define R(i) gpr(i)
 #define Mr vaddr_read
@@ -71,8 +89,98 @@ static int decode_exec(Decode *s) {
   INSTPAT("??????? ????? ????? 100 ????? 00000 11", lbu    , I, R(rd) = Mr(src1 + imm, 1));
 
   // J type
-  INSTPAT("??????? ????? ????? ??? ????? 11011 11", jal    , J, R(rd) = s->snpc; s->dnpc = s->pc + imm;);
-  INSTPAT("??????? ????? ????? 000 ????? 11001 11", jalr   , I, R(rd) = s->snpc; s->dnpc = src1 + imm;);
+  INSTPAT("??????? ????? ????? ??? ????? 11011 11", jal    , J, {R(rd) = s->snpc; s->dnpc = s->pc + imm;
+#ifdef CONFIG_FTRACE
+    if (p == NULL) {
+      init = p = (char *)malloc(1000);
+      max = 1000;
+    } else if (max - nc < THRESHOLD) {
+      max = max * 2;
+      char * t = (char*)malloc(max);
+      memcpy(t, init, nc);
+      free(init);
+      init = t;
+      p = init + nc;
+    }
+    size_t entnum = symtab.sh_size / symtab.sh_entsize;
+    size_t n;
+    for (int i = 0; i < entnum; i++) {
+    Elf32_Sym *sym = &sym_table[i];
+    if (ELF32_ST_TYPE(sym->st_info) == STT_FUNC && (s->dnpc == sym->st_value)) {
+      n = sprintf(p, "0x%x: ", s->pc);
+      p += n;
+      nc += n;
+      for (int j = 0; j < indent; j++) {
+        n = sprintf(p, "  ");
+        p += n;
+        nc += n;
+      }
+      n = sprintf(p, "call [%s@0x%x]\n", &str_table[sym->st_name], s->dnpc);
+      p += n;
+      nc += n;
+      indent++;
+    }
+  }
+#endif
+  });
+  INSTPAT("??????? ????? ????? 000 ????? 11001 11", jalr   , I, {R(rd) = s->snpc; s->dnpc = src1 + imm;
+#ifdef CONFIG_FTRACE
+    if (p == NULL) {
+      init = p = (char *)malloc(1000);
+      max = 1000;
+    } else if (max - nc < THRESHOLD) {
+      max = max * 2;
+      char * t = (char*)malloc(max);
+      memcpy(t, init, nc);
+      free(init);
+      init = t;
+      p = init + nc;
+    }
+    size_t n;
+    size_t entnum = symtab.sh_size / symtab.sh_entsize;
+    if (BITS(s->isa.inst, 19, 15) == 1) {
+      for (int i = 0; i < entnum; i++) {
+        Elf32_Sym *sym = &sym_table[i];
+        if (ELF32_ST_TYPE(sym->st_info) == STT_FUNC && (s->pc >= sym->st_value && s->pc < sym->st_value + sym->st_size)) {
+          //printf("%s\n", &str_table[sym->st_name]);
+          indent--;
+          n = sprintf(p, "0x%x: ", s->pc);
+          p += n;
+          nc += n;
+
+          for (int j = 0; j < indent; j++) {
+            n = sprintf(p, "  ");
+            p += n;
+            nc += n;
+          }
+          n = sprintf(p, "ret  [%s]\n", &str_table[sym->st_name]);
+          p += n;
+          nc += n;
+        } 
+      }
+    } else {
+      for (int i = 0; i < entnum; i++) {
+        Elf32_Sym *sym = &sym_table[i];
+        if (ELF32_ST_TYPE(sym->st_info) == STT_FUNC && (s->dnpc == sym->st_value)) {
+          n = sprintf(p, "0x%x: ", s->pc);
+          p += n;
+          nc += n;
+          for (int j = 0; j < indent; j++) {
+            n = sprintf(p, "  ");
+            p += n;
+            nc += n;
+          }
+          n = sprintf(p, "call [%s@0x%x]\n", &str_table[sym->st_name], s->dnpc);
+          p += n;
+          nc += n;
+          indent++;
+        }
+
+      }
+    }
+#endif
+
+  });
 
   // S type
   INSTPAT("??????? ????? ????? 000 ????? 01000 11", sb     , S, Mw(src1 + imm, 1, src2));
@@ -131,10 +239,11 @@ static int decode_exec(Decode *s) {
 
 
 
-  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak , N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
+  INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak , N, NEMUTRAP(s->pc, R(10)); IFDEF(CONFIG_DIFFTEST, difftest_skip_ref();)); // R(10) is $a0
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv    , N, INV(s->pc));
-  INSTPAT_END();
 
+
+  INSTPAT_END();
   R(0) = 0; // reset $zero to 0
 
   return 0;

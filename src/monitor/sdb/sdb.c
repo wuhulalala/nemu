@@ -21,7 +21,10 @@
 #include "sdb.h"
 
 static int is_batch_mode = false;
-
+#ifdef CONFIG_FTRACE
+extern char *init;
+extern uint64_t nc;
+#endif
 uint8_t* guest_to_host(paddr_t paddr);
 paddr_t host_to_guest(uint8_t *haddr);
 void init_regex();
@@ -268,6 +271,19 @@ void sdb_set_batch_mode() {
 void sdb_mainloop() {
   if (is_batch_mode) {
     cmd_c(NULL);
+#ifdef CONFIG_FTRACE
+    *(init + nc)= 0;
+    FILE *file = fopen("/tmp/re.txt", "w");
+    if (file == NULL) {
+        perror("Error redirecting stdout");
+        return;
+    }
+
+    printf("This will be written to the file.\n");
+    fprintf(file, "%s", init);
+    fclose(file);
+    free(init);
+#endif
     return;
   }
 
@@ -294,11 +310,27 @@ void sdb_mainloop() {
     int i;
     for (i = 0; i < NR_CMD; i ++) {
       if (strcmp(cmd, cmd_table[i].name) == 0) {
-        if (cmd_table[i].handler(args) < 0) { return; }
+        if (cmd_table[i].handler(args) < 0) { 
+          return; 
+        }
         break;
       }
     }
+#ifdef CONFIG_FTRACE
+    if (strcmp(cmd, "c") == 0) {
+      *(init + nc)= 0;
+      FILE *file = fopen("/tmp/re.txt", "w");
+      if (file == NULL) {
+          perror("Error redirecting stdout");
+          return;
+      }
 
+      printf("This will be written to the file.\n");
+      fprintf(file, "%s", init);
+      fclose(file);
+      free(init);
+    }
+#endif
     if (i == NR_CMD) { printf("Unknown command '%s'\n", cmd); }
   }
 }
