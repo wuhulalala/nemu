@@ -188,7 +188,9 @@ void cpu_exec(uint64_t n) {
   }
 }
 
+#ifdef CONFIG_RTRACE
 void init_decode() {
   s.index = 0;
   s.count = 0;
 }
+#endif

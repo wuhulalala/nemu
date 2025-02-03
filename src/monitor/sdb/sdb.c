@@ -343,6 +343,9 @@ void init_sdb() {
   init_wp_pool();
 
 
+
+#ifdef CONFIG_RTRACE
   /* Initialize the Decode*/
   init_decode();
+#endif
 }
