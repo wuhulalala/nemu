@@ -26,6 +26,10 @@ static const uint32_t img [] = {
   0xdeadbeef,  // some data
 };
 
+static void init_mstatus() {
+  cpu.csr.mstatus.val = 0x1800;  
+}
+
 static void restart() {
   /* Set the initial program counter. */
   cpu.pc = RESET_VECTOR;
@@ -40,4 +44,9 @@ void init_isa() {
 
   /* Initialize this virtual computer system. */
   restart();
+
+  cpu.mode = 3;
+
+  init_mstatus();
+
 }

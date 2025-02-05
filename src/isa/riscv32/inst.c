@@ -43,7 +43,7 @@ void difftest_skip_ref();
 
 enum {
   TYPE_I, TYPE_U, TYPE_S, TYPE_J, TYPE_B, TYPE_R,
-  TYPE_N, // none
+  TYPE_N, TYPE_Z,// none
 };
 
 #define src1R() do { *src1 = R(rs1); } while (0)
@@ -53,6 +53,7 @@ enum {
 #define immS() do { *imm = (SEXT(BITS(i, 31, 25), 7) << 5) | BITS(i, 11, 7); } while(0)
 #define immJ() do { *imm = ((SEXT(BITS(i, 31, 31), 1) << 19) | BITS(i, 19, 12) << 11 | BITS(i, 20, 20) << 10 | BITS(i, 30, 21)) << 1;} while(0)
 #define immB() do { *imm = (SEXT(BITS(i, 31, 31), 1) << 11 | BITS(i, 7, 7) << 10 | BITS(i, 30, 25) << 4 | BITS(i, 11, 8)) << 1;} while(0)
+#define immZ() do { *imm = BITS(i, 31, 20);} while(0)
 static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_t *imm, int type) {
   uint32_t i = s->isa.inst;
   int rs1 = BITS(i, 19, 15);
@@ -65,6 +66,7 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_
     case TYPE_J:                   immJ(); break;
     case TYPE_B: src1R(); src2R(); immB(); break;
     case TYPE_R: src1R(); src2R();         break;
+    case TYPE_Z: src1R();          immZ(); break;
     case TYPE_N: break;
     default: panic("unsupported type = %d", type);
   }
@@ -236,13 +238,126 @@ static int decode_exec(Decode *s) {
   INSTPAT("0000001 ????? ????? 111 ????? 01100 11", remu     , R, R(rd) = src1 % src2);
 
   INSTPAT("0000000 ????? ????? 111 ????? 01100 11", and      , R, R(rd) = src1 & src2);
-  INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or      , R, R(rd) = src1 | src2);
+  INSTPAT("0000000 ????? ????? 110 ????? 01100 11", or       , R, R(rd) = src1 | src2);
   INSTPAT("0000000 ????? ????? 100 ????? 01100 11", xor      , R, R(rd) = src1 ^ src2);
 
 
+  // csr register
+  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrw  , Z, {
+    switch(imm) {
+      case 0x300: {
+        word_t t = cpu.csr.mstatus.val;
+        cpu.csr.mstatus.val = src1;
+        R(rd) = t;
+        break;
+      }
+      case 0x305: {
+        word_t t = cpu.csr.mtvec;
+        cpu.csr.mtvec = src1;
+        R(rd) = t;
+        break;
+
+      }     // mtvec
+      case 0x341: {
+        word_t t = cpu.csr.mepc;
+        cpu.csr.mepc = src1;
+        R(rd) = t;
+        break;
+
+      }      // mepc
+      case 0x342: {
+        word_t t = cpu.csr.mcause;
+        cpu.csr.mcause = src1;
+        R(rd) = t;
+        break;
+
+      }    // mcause
+      case 0x304: {
+        word_t t = cpu.csr.mie;
+        cpu.csr.mie = src1;
+        R(rd) = t;
+        break;
+
+      }       // mie
+      case 0x340: {
+        word_t t = cpu.csr.mscratch;
+        cpu.csr.mscratch = src1;
+        R(rd) = t;
+        break;
+
+      } // mscratch
+      case 0x344: {
+        word_t t = cpu.csr.mip;
+        cpu.csr.mip = src1;
+        R(rd) = t;
+        break;
+
+      }      // mip
+      default: panic();                // 
+    }
+  });
+
+
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrr  , Z, {
+    switch(imm) {
+      case 0x300: {
+        word_t t = cpu.csr.mstatus.val;
+        cpu.csr.mstatus.val = src1 | t;
+        R(rd) = t;
+        break;
+      }
+      case 0x305: {
+        word_t t = cpu.csr.mtvec;
+        cpu.csr.mtvec = src1 | t;
+        R(rd) = t;
+        break;
+
+      }     // mtvec
+      case 0x341: {
+        word_t t = cpu.csr.mepc;
+        cpu.csr.mepc = src1 | t;
+        R(rd) = t;
+        break;
+
+      }      // mepc
+      case 0x342: {
+        word_t t = cpu.csr.mcause;
+        cpu.csr.mcause = src1 | t;
+        R(rd) = t;
+        break;
+
+      }    // mcause
+      case 0x304: {
+        word_t t = cpu.csr.mie;
+        cpu.csr.mie = src1 | t;
+        R(rd) = t;
+        break;
+
+      }       // mie
+      case 0x340: {
+        word_t t = cpu.csr.mscratch;
+        cpu.csr.mscratch = src1 | t;
+        R(rd) = t;
+        break;
+
+      } // mscratch
+      case 0x344: {
+        word_t t = cpu.csr.mip;
+        cpu.csr.mip = src1 | t;
+        R(rd) = t;
+        break;
+
+      }      // mip
+      default: Assert(0, "should not reach here");                // 
+    }
+  });
+
+  INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall  , N, s->dnpc = isa_raise_intr(11, s->pc); );
+  INSTPAT("0011000 00010 00000 000 00000 11100 11", mret   , N, s->dnpc = isa_mret_intr(); );
 
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak , N, NEMUTRAP(s->pc, R(10)); IFDEF(CONFIG_DIFFTEST, difftest_skip_ref();)); // R(10) is $a0
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv    , N, INV(s->pc));
+  
 
 
   INSTPAT_END();
