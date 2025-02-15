@@ -13,6 +13,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
+
 #include <isa.h>
 
 #define CAUSE_USER_ECALL 8
@@ -24,6 +25,7 @@
 #define PRV_S 1
 #define PRV_M 3
 
+#ifdef CONFIG_ETRACE
 typedef struct {
     uint32_t seqnr;        
     vaddr_t pre_pc;        
@@ -41,35 +43,36 @@ typedef struct {
 static void log_exception();
 static void print_etrace(Etrace_Entry *e);
 static const char* get_mcause_str(uint32_t mcause);  
+#endif
 
 word_t isa_raise_intr(word_t NO, vaddr_t epc) {
   /* TODO: Trigger an interrupt/exception with ``NO''.
    * Then return the address of the interrupt/exception vector.
    */
-  cpu.csr.mepc = epc;
-  cpu.csr.mcause = NO;
-  cpu.csr.mstatus.fields.previous_interrupt.MPIE = cpu.csr.mstatus.fields.interrupt_enable.MIE;
-  cpu.csr.mstatus.fields.interrupt_enable.MIE = 0;
-  cpu.csr.mstatus.fields.privilege_control.MPP = cpu.mode;
-  cpu.mode = 3;
-  Assert(cpu.csr.mtvec, "mtvec is NULL");
+  cpu.mepc = epc;
+  cpu.mcause = NO;
+  cpu.mstatus.fields.MPIE = cpu.mstatus.fields.MIE;
+  cpu.mstatus.fields.MIE = 0;
+  cpu.mstatus.fields.MPP = PRV_M;
+  Assert(cpu.mtvec, "mtvec is NULL");
+#ifdef CONFIG_ETRACE
   log_exception();
-  return cpu.csr.mtvec;
+#endif
+  return cpu.mtvec;
 }
 
 word_t isa_mret_intr() {
-  cpu.csr.mstatus.fields.interrupt_enable.MIE = cpu.csr.mstatus.fields.previous_interrupt.MPIE;
-  cpu.csr.mstatus.fields.previous_interrupt.MPIE = 1;
-  cpu.mode = cpu.csr.mstatus.fields.privilege_control.MPP;
-  cpu.csr.mstatus.fields.privilege_control.MPP = 0;
-
-  return cpu.csr.mepc;
+  cpu.mstatus.fields.MIE = cpu.mstatus.fields.MPIE;
+  cpu.mstatus.fields.MPIE = 1;
+  cpu.mstatus.fields.MPP = 0;
+  return cpu.mepc;
 }
 
 word_t isa_query_intr() {
   return INTR_EMPTY;
 }
 
+#ifdef CONFIG_ETRACE
 static void print_etrace(Etrace_Entry *e) {
     const char *cause_str = get_mcause_str(e->mcause);
     
@@ -109,14 +112,16 @@ static void log_exception() {
     Etrace_Entry e = {
         .seqnr = ++seqnr,
         .pre_pc = cpu.pc,
-        .cur_pc = cpu.csr.mtvec,
-        .mcause = cpu.csr.mcause,
-        .pre_mode = cpu.csr.mstatus.fields.privilege_control.MPP,
+        .cur_pc = cpu.mtvec,
+        .mcause = cpu.mcause,
+        .pre_mode = cpu.mstatus.fields.MPP,
         .cur_mode = PRV_M,  // 异常后进入M-mode
-        .mepc = cpu.csr.mepc,
-        .mstatus = cpu.csr.mstatus.val,
+        .mepc = cpu.mepc,
+        .mstatus = cpu.mstatus.val,
         .a7 = cpu.gpr[17]   // a0寄存器值
     };
     
     print_etrace(&e);
 }
+
+#endif

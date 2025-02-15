@@ -148,7 +148,7 @@ static int cmd_p(char *args) {
   if (!success) {
     printf("something wrong in make_token\n");
   }
-  printf("$%d = %lu\n", tr, result);
+  printf("$%d = %lu   0x%lx\n", tr, result, result);
   tr++;
   
   return 0;
@@ -175,6 +175,7 @@ static int cmd_x(char *args) {
     Log("invalid address format");
     return 0;
   }
+
 
   if ((unsigned long)addr < CONFIG_MBASE) {
     Log("The memory address cannot be accessed");

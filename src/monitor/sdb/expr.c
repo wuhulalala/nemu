@@ -263,7 +263,7 @@ uint64_t eval(int p, int q) {
         sscanf(tokens[p].str, "%lx", &val) ;
         return val;
       case TK_REG:
-        bool success;
+        bool success = false;
         val = isa_reg_str2val(tokens[p].str, &success);
         if (success) return val;
         return 0;

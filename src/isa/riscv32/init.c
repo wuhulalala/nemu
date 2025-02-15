@@ -26,9 +26,9 @@ static const uint32_t img [] = {
   0xdeadbeef,  // some data
 };
 
-static void init_mstatus() {
-  cpu.csr.mstatus.val = 0x1800;  
-}
+//static void init_mstatus() {
+  //cpu.mstatus.val = 0x1800;  
+//}
 
 static void restart() {
   /* Set the initial program counter. */
@@ -47,6 +47,6 @@ void init_isa() {
 
   cpu.mode = 3;
 
-  init_mstatus();
+  //init_mstatus();
 
 }

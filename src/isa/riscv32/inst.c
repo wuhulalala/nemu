@@ -246,53 +246,32 @@ static int decode_exec(Decode *s) {
   INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrw  , Z, {
     switch(imm) {
       case 0x300: {
-        word_t t = cpu.csr.mstatus.val;
-        cpu.csr.mstatus.val = src1;
+        word_t t = cpu.mstatus.val;
+        cpu.mstatus.val = src1;
         R(rd) = t;
         break;
       }
       case 0x305: {
-        word_t t = cpu.csr.mtvec;
-        cpu.csr.mtvec = src1;
+        word_t t = cpu.mtvec;
+        cpu.mtvec = src1;
         R(rd) = t;
         break;
 
       }     // mtvec
       case 0x341: {
-        word_t t = cpu.csr.mepc;
-        cpu.csr.mepc = src1;
+        word_t t = cpu.mepc;
+        cpu.mepc = src1;
         R(rd) = t;
         break;
 
       }      // mepc
       case 0x342: {
-        word_t t = cpu.csr.mcause;
-        cpu.csr.mcause = src1;
+        word_t t = cpu.mcause;
+        cpu.mcause = src1;
         R(rd) = t;
         break;
 
       }    // mcause
-      case 0x304: {
-        word_t t = cpu.csr.mie;
-        cpu.csr.mie = src1;
-        R(rd) = t;
-        break;
-
-      }       // mie
-      case 0x340: {
-        word_t t = cpu.csr.mscratch;
-        cpu.csr.mscratch = src1;
-        R(rd) = t;
-        break;
-
-      } // mscratch
-      case 0x344: {
-        word_t t = cpu.csr.mip;
-        cpu.csr.mip = src1;
-        R(rd) = t;
-        break;
-
-      }      // mip
       default: panic();                // 
     }
   });
@@ -301,53 +280,32 @@ static int decode_exec(Decode *s) {
   INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrr  , Z, {
     switch(imm) {
       case 0x300: {
-        word_t t = cpu.csr.mstatus.val;
-        cpu.csr.mstatus.val = src1 | t;
+        word_t t = cpu.mstatus.val;
+        cpu.mstatus.val = src1 | t;
         R(rd) = t;
         break;
       }
       case 0x305: {
-        word_t t = cpu.csr.mtvec;
-        cpu.csr.mtvec = src1 | t;
+        word_t t = cpu.mtvec;
+        cpu.mtvec = src1 | t;
         R(rd) = t;
         break;
 
       }     // mtvec
       case 0x341: {
-        word_t t = cpu.csr.mepc;
-        cpu.csr.mepc = src1 | t;
+        word_t t = cpu.mepc;
+        cpu.mepc = src1 | t;
         R(rd) = t;
         break;
 
       }      // mepc
       case 0x342: {
-        word_t t = cpu.csr.mcause;
-        cpu.csr.mcause = src1 | t;
+        word_t t = cpu.mcause;
+        cpu.mcause = src1 | t;
         R(rd) = t;
         break;
 
       }    // mcause
-      case 0x304: {
-        word_t t = cpu.csr.mie;
-        cpu.csr.mie = src1 | t;
-        R(rd) = t;
-        break;
-
-      }       // mie
-      case 0x340: {
-        word_t t = cpu.csr.mscratch;
-        cpu.csr.mscratch = src1 | t;
-        R(rd) = t;
-        break;
-
-      } // mscratch
-      case 0x344: {
-        word_t t = cpu.csr.mip;
-        cpu.csr.mip = src1 | t;
-        R(rd) = t;
-        break;
-
-      }      // mip
       default: Assert(0, "should not reach here");                // 
     }
   });
